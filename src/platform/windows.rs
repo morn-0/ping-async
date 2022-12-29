@@ -9,11 +9,11 @@ use std::ptr::NonNull;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use futures::channel::mpsc::UnboundedSender;
+use futures::channel::oneshot::Sender;
 use static_assertions::const_assert;
 
 use windows::Win32::Foundation::{
-    CloseHandle, BOOLEAN, ERROR_IO_PENDING, HANDLE, INVALID_HANDLE_VALUE,
+    CloseHandle, GetLastError, BOOLEAN, ERROR_IO_PENDING, HANDLE, INVALID_HANDLE_VALUE,
 };
 use windows::Win32::NetworkManagement::IpHelper::{
     Icmp6CreateFile, Icmp6ParseReplies, Icmp6SendEcho2, IcmpCloseHandle, IcmpCreateFile,
@@ -73,15 +73,15 @@ const_assert!(
 struct ReplyContext {
     state: ReplyBufferState,
     buffer: Box<[u8]>,
-    sender: UnboundedSender<IcmpEchoReply>,
+    sender: Option<Sender<IcmpEchoReply>>,
 }
 
 impl ReplyContext {
-    fn new(sender: UnboundedSender<IcmpEchoReply>) -> Self {
+    fn new(sender: Sender<IcmpEchoReply>) -> Self {
         ReplyContext {
             state: ReplyBufferState::Empty,
             buffer: vec![0u8; REPLY_BUFFER_SIZE].into_boxed_slice(),
-            sender,
+            sender: Some(sender),
         }
     }
 
@@ -111,7 +111,7 @@ pub struct IcmpEchoSender {
 
 impl IcmpEchoSender {
     pub fn new(
-        reply_tx: UnboundedSender<IcmpEchoReply>,
+        reply_tx: Sender<IcmpEchoReply>,
         target_addr: IpAddr,
         source_addr: Option<IpAddr>,
         ttl: Option<u8>,
@@ -250,11 +250,15 @@ impl IcmpEchoSender {
             }
         };
 
-        if error == 0 {
-            Err(io::Error::last_os_error())
-        } else {
-            assert!(error == ERROR_IO_PENDING.0);
+        if error == ERROR_IO_PENDING.0 {
             Ok(())
+        } else {
+            let code = unsafe { GetLastError() };
+            if code == ERROR_IO_PENDING {
+                Ok(())
+            } else {
+                Err(io::Error::last_os_error())
+            }
         }
     }
 }
@@ -302,7 +306,7 @@ unsafe extern "system" fn wait_callback(ptr: *mut c_void, _timer_fired: BOOLEAN)
 
     let resp = match reply_context.state {
         ReplyBufferState::Empty => {
-            log::warn!("event signalled with invalid empty state");
+            log::debug!("event signalled with invalid empty state");
             return;
         }
         ReplyBufferState::Icmp4 => unsafe {
@@ -311,7 +315,7 @@ unsafe extern "system" fn wait_callback(ptr: *mut c_void, _timer_fired: BOOLEAN)
                 reply_context.buffer_size() as u32,
             );
             if ret == 0 {
-                log::warn!("IcmpParseReplies failed: {}", io::Error::last_os_error());
+                log::debug!("IcmpParseReplies failed: {}", io::Error::last_os_error());
                 return;
             } else {
                 debug_assert!(ret == 1);
@@ -334,7 +338,7 @@ unsafe extern "system" fn wait_callback(ptr: *mut c_void, _timer_fired: BOOLEAN)
                 )
             };
             if ret == 0 {
-                log::warn!("Icmp6ParseReplies failed: {}", io::Error::last_os_error());
+                log::debug!("Icmp6ParseReplies failed: {}", io::Error::last_os_error());
                 return;
             } else {
                 debug_assert!(ret == 1);
@@ -353,7 +357,14 @@ unsafe extern "system" fn wait_callback(ptr: *mut c_void, _timer_fired: BOOLEAN)
         }
     };
 
-    if let Err(e) = reply_context.sender.unbounded_send(resp) {
-        log::warn!("failed to send reply: {}", e);
+    match reply_context.sender.take() {
+        Some(sender) => {
+            if let Err(_) = sender.send(resp) {
+                log::debug!("failed to send reply to channel");
+            }
+        }
+        None => {
+            log::debug!("event signalled with no sender");
+        }
     }
 }
