@@ -26,7 +26,7 @@ use windows::Win32::Networking::WinSock::{IN6_ADDR, SOCKADDR_IN6};
 use windows::Win32::System::Threading::{
     CreateEventW, RegisterWaitForSingleObject, UnregisterWaitEx, WT_EXECUTEINWAITTHREAD,
 };
-use windows::Win32::System::WindowsProgramming::{INFINITE, IO_STATUS_BLOCK};
+use windows::Win32::System::WindowsProgramming::IO_STATUS_BLOCK;
 
 #[cfg(target_pointer_width = "32")]
 use windows::Win32::NetworkManagement::IpHelper::ICMP_ECHO_REPLY;
@@ -74,14 +74,18 @@ struct ReplyContext {
     state: ReplyBufferState,
     buffer: Box<[u8]>,
     sender: Option<Sender<IcmpEchoReply>>,
+    target: IpAddr,
+    timeout: Duration,
 }
 
 impl ReplyContext {
-    fn new(sender: Sender<IcmpEchoReply>) -> Self {
+    fn new(sender: Sender<IcmpEchoReply>, target: IpAddr, timeout: Duration) -> Self {
         ReplyContext {
             state: ReplyBufferState::Empty,
             buffer: vec![0u8; REPLY_BUFFER_SIZE].into_boxed_slice(),
             sender: Some(sender),
+            target,
+            timeout,
         }
     }
 
@@ -95,6 +99,14 @@ impl ReplyContext {
 
     fn buffer_size(&self) -> usize {
         self.buffer.len()
+    }
+
+    fn target(&self) -> IpAddr {
+        self.target
+    }
+
+    fn timeout(&self) -> Duration {
+        self.timeout
     }
 }
 
@@ -131,8 +143,11 @@ impl IcmpEchoSender {
             }
         };
 
+        let ttl = ttl.unwrap_or(PING_DEFAULT_TTL);
+        let timeout = timeout.unwrap_or(PING_DEFAULT_TIMEOUT);
+
         let reply_context = NonNull::new(Box::into_raw(Box::new(Arc::new(Mutex::new(
-            ReplyContext::new(reply_tx),
+            ReplyContext::new(reply_tx, target_addr, timeout),
         )))))
         .expect("Box::into_raw returned null");
 
@@ -143,7 +158,7 @@ impl IcmpEchoSender {
                 event,
                 Some(wait_callback),
                 Some(reply_context.as_ptr() as *const _),
-                INFINITE,
+                timeout.as_millis() as u32,
                 WT_EXECUTEINWAITTHREAD,
             )
             .ok()
@@ -162,8 +177,8 @@ impl IcmpEchoSender {
             wait_object,
             target_addr,
             source_addr,
-            ttl: ttl.unwrap_or(PING_DEFAULT_TTL),
-            timeout: timeout.unwrap_or(PING_DEFAULT_TIMEOUT),
+            ttl,
+            timeout,
             reply_context,
         })
     }
@@ -297,62 +312,71 @@ fn ip_error_to_icmp_status(code: u32) -> IcmpEchoStatus {
     }
 }
 
-unsafe extern "system" fn wait_callback(ptr: *mut c_void, _timer_fired: BOOLEAN) {
+unsafe extern "system" fn wait_callback(ptr: *mut c_void, timer_fired: BOOLEAN) {
     let mut reply_context = (ptr as *mut Arc<Mutex<ReplyContext>>)
         .as_ref()
         .unwrap()
         .lock()
         .unwrap();
 
-    let resp = match reply_context.state {
-        ReplyBufferState::Empty => {
-            log::debug!("event signalled with invalid empty state");
-            return;
-        }
-        ReplyBufferState::Icmp4 => unsafe {
-            let ret = IcmpParseReplies(
-                reply_context.buffer_ptr() as *mut _,
-                reply_context.buffer_size() as u32,
-            );
-            if ret == 0 {
-                log::debug!("IcmpParseReplies failed: {}", io::Error::last_os_error());
+    let resp = if timer_fired.as_bool() {
+        log::debug!("wait_callback timed out");
+        IcmpEchoReply::new(
+            reply_context.target(),
+            IcmpEchoStatus::TimedOut,
+            reply_context.timeout(),
+        )
+    } else {
+        match reply_context.state {
+            ReplyBufferState::Empty => {
+                log::debug!("event signalled with invalid empty state");
                 return;
-            } else {
-                debug_assert!(ret == 1);
-
-                let resp = *(reply_context.buffer_ptr() as *const ICMP_ECHO_REPLY);
-                let addr = IpAddr::V4(u32::from_be(resp.Address).into());
-
-                IcmpEchoReply::new(
-                    addr,
-                    ip_error_to_icmp_status(resp.Status),
-                    Duration::from_millis(resp.RoundTripTime.into()),
-                )
             }
-        },
-        ReplyBufferState::Icmp6 => {
-            let ret = unsafe {
-                Icmp6ParseReplies(
+            ReplyBufferState::Icmp4 => unsafe {
+                let ret = IcmpParseReplies(
                     reply_context.buffer_ptr() as *mut _,
                     reply_context.buffer_size() as u32,
-                )
-            };
-            if ret == 0 {
-                log::debug!("Icmp6ParseReplies failed: {}", io::Error::last_os_error());
-                return;
-            } else {
-                debug_assert!(ret == 1);
+                );
+                if ret == 0 {
+                    log::debug!("IcmpParseReplies failed: {}", io::Error::last_os_error());
+                    return;
+                } else {
+                    debug_assert!(ret == 1);
 
-                let resp = *(reply_context.buffer_ptr() as *const ICMPV6_ECHO_REPLY);
-                let mut addr_raw = IN6_ADDR::default();
-                addr_raw.u.Word = resp.Address.sin6_addr;
-                let addr = IpAddr::V6(addr_raw.into());
+                    let resp = *(reply_context.buffer_ptr() as *const ICMP_ECHO_REPLY);
+                    let addr = IpAddr::V4(u32::from_be(resp.Address).into());
 
-                IcmpEchoReply::new(
-                    addr,
-                    ip_error_to_icmp_status(resp.Status),
-                    Duration::from_millis(resp.RoundTripTime.into()),
-                )
+                    IcmpEchoReply::new(
+                        addr,
+                        ip_error_to_icmp_status(resp.Status),
+                        Duration::from_millis(resp.RoundTripTime.into()),
+                    )
+                }
+            },
+            ReplyBufferState::Icmp6 => {
+                let ret = unsafe {
+                    Icmp6ParseReplies(
+                        reply_context.buffer_ptr() as *mut _,
+                        reply_context.buffer_size() as u32,
+                    )
+                };
+                if ret == 0 {
+                    log::debug!("Icmp6ParseReplies failed: {}", io::Error::last_os_error());
+                    return;
+                } else {
+                    debug_assert!(ret == 1);
+
+                    let resp = *(reply_context.buffer_ptr() as *const ICMPV6_ECHO_REPLY);
+                    let mut addr_raw = IN6_ADDR::default();
+                    addr_raw.u.Word = resp.Address.sin6_addr;
+                    let addr = IpAddr::V6(addr_raw.into());
+
+                    IcmpEchoReply::new(
+                        addr,
+                        ip_error_to_icmp_status(resp.Status),
+                        Duration::from_millis(resp.RoundTripTime.into()),
+                    )
+                }
             }
         }
     };
