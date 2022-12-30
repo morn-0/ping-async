@@ -1,7 +1,13 @@
 // examples/ping.rs
 
-use futures::channel::oneshot;
+use std::io;
+use std::net::IpAddr;
+
+use futures::{channel::oneshot, StreamExt};
 use ping_rs::IcmpEchoSender;
+
+use tokio::time;
+use tokio_stream::wrappers::IntervalStream;
 
 #[tokio::main]
 async fn main() {
@@ -13,28 +19,43 @@ async fn main() {
 
     let destination = args[1].parse().unwrap();
 
+    let interv = IntervalStream::new(time::interval(time::Duration::from_secs(1)));
+    interv
+        .take(4)
+        .for_each(|_| async {
+            let _ = ping(destination).await;
+        })
+        .await;
+}
+
+async fn ping(dest: IpAddr) -> io::Result<()> {
     let (tx, rx) = oneshot::channel();
 
-    match IcmpEchoSender::new(tx, destination, None, None, None) {
+    match IcmpEchoSender::new(tx, dest, None, None, None) {
         Ok(s) => match s.send() {
-            Ok(_) => {
-                if let Ok(reply) = rx.await {
+            Ok(_) => match rx.await {
+                Ok(reply) => {
                     println!(
                         "Reply from {}: status = {:?}, time = {:?}",
                         reply.destination(),
                         reply.status(),
                         reply.round_trip_time()
                     );
+                    Ok(())
                 }
-            }
+                Err(e) => {
+                    eprintln!("Error in rx: {}", e);
+                    Ok(())
+                }
+            },
             Err(e) => {
                 eprintln!("Error in send: {}", e);
-                std::process::exit(1);
+                Err(e)
             }
         },
         Err(e) => {
             eprintln!("Error in new: {}", e);
-            std::process::exit(1);
+            Err(e)
         }
     }
 }

@@ -22,4 +22,5 @@ features = [
 ]
 
 [dev-dependencies]
-tokio = { version = "1.2", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1.2", features = ["macros", "rt-multi-thread", "time"] }
+tokio-stream = { version = "0.1", features = ["time"] }

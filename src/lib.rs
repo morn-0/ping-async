@@ -7,7 +7,7 @@ use std::net::IpAddr;
 use std::time::Duration;
 
 pub const PING_DEFAULT_TTL: u8 = 128;
-pub const PING_DEFAULT_TIMEOUT: Duration = Duration::from_secs(4);
+pub const PING_DEFAULT_TIMEOUT: Duration = Duration::from_secs(2);
 pub const PING_DEFFAULT_REQUEST_DATA_LENGTH: usize = 32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
