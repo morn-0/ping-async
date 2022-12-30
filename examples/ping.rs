@@ -3,8 +3,8 @@
 use std::io;
 use std::net::IpAddr;
 
+use async_ping::IcmpEchoSender;
 use futures::{channel::oneshot, StreamExt};
-use ping_rs::IcmpEchoSender;
 
 use tokio::time;
 use tokio_stream::wrappers::IntervalStream;
@@ -19,8 +19,8 @@ async fn main() {
 
     let destination = args[1].parse().unwrap();
 
-    let interv = IntervalStream::new(time::interval(time::Duration::from_secs(1)));
-    interv
+    let interval = IntervalStream::new(time::interval(time::Duration::from_secs(1)));
+    interval
         .take(4)
         .for_each(|_| async {
             let _ = ping(destination).await;
