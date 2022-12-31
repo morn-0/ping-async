@@ -29,6 +29,7 @@ impl IcmpEchoStatus {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct IcmpEchoReply {
     destination: IpAddr,
     status: IcmpEchoStatus,
