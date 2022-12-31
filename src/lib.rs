@@ -1,7 +1,7 @@
 // lib.rs
 
 mod platform;
-pub use platform::IcmpEchoSender;
+pub use platform::IcmpEchoRequestor;
 
 use std::net::IpAddr;
 use std::time::Duration;

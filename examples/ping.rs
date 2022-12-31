@@ -3,7 +3,7 @@
 use std::io;
 use std::net::IpAddr;
 
-use async_ping::IcmpEchoSender;
+use async_ping::IcmpEchoRequestor;
 use futures::{channel::oneshot, StreamExt};
 
 use tokio::time;
@@ -31,7 +31,7 @@ async fn main() {
 async fn ping(dest: IpAddr) -> io::Result<()> {
     let (tx, rx) = oneshot::channel();
 
-    match IcmpEchoSender::new(tx, dest, None, None, None) {
+    match IcmpEchoRequestor::new(tx, dest, None, None, None) {
         Ok(s) => match s.send() {
             Ok(_) => match rx.await {
                 Ok(reply) => {

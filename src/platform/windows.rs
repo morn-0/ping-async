@@ -110,7 +110,7 @@ impl ReplyContext {
     }
 }
 
-pub struct IcmpEchoSender {
+pub struct IcmpEchoRequestor {
     handle: IcmpHandle,
     event: HANDLE,
     wait_object: HANDLE,
@@ -121,7 +121,7 @@ pub struct IcmpEchoSender {
     reply_context: NonNull<Arc<Mutex<ReplyContext>>>,
 }
 
-impl IcmpEchoSender {
+impl IcmpEchoRequestor {
     pub fn new(
         reply_tx: Sender<IcmpEchoReply>,
         target_addr: IpAddr,
@@ -171,7 +171,7 @@ impl IcmpEchoSender {
             }
         };
 
-        Ok(IcmpEchoSender {
+        Ok(IcmpEchoRequestor {
             handle,
             event,
             wait_object,
@@ -278,7 +278,7 @@ impl IcmpEchoSender {
     }
 }
 
-impl Drop for IcmpEchoSender {
+impl Drop for IcmpEchoRequestor {
     fn drop(&mut self) {
         unsafe {
             if !self.wait_object.is_invalid() {
