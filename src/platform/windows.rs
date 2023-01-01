@@ -49,10 +49,7 @@ enum ReplyBufferState {
     Icmp6,
 }
 
-const REPLY_BUFFER_SIZE: usize = size_of::<ICMP_ECHO_REPLY>()
-    + PING_DEFFAULT_REQUEST_DATA_LENGTH
-    + 8
-    + size_of::<IP_OPTION_INFORMATION>();
+const REPLY_BUFFER_SIZE: usize = 100;
 
 // we don't provide request data, so we don't need to allocate space for it
 const_assert!(
