@@ -9,7 +9,7 @@ use std::ptr::NonNull;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use futures::channel::oneshot::Sender;
+use futures::channel::mpsc::UnboundedSender;
 use static_assertions::const_assert;
 
 use windows::Win32::Foundation::{
@@ -70,13 +70,13 @@ const_assert!(
 struct ReplyContext {
     state: ReplyBufferState,
     buffer: Box<[u8]>,
-    sender: Option<Sender<IcmpEchoReply>>,
+    sender: Option<UnboundedSender<IcmpEchoReply>>,
     target: IpAddr,
     timeout: Duration,
 }
 
 impl ReplyContext {
-    fn new(sender: Sender<IcmpEchoReply>, target: IpAddr, timeout: Duration) -> Self {
+    fn new(sender: UnboundedSender<IcmpEchoReply>, target: IpAddr, timeout: Duration) -> Self {
         ReplyContext {
             state: ReplyBufferState::Empty,
             buffer: vec![0u8; REPLY_BUFFER_SIZE].into_boxed_slice(),
@@ -120,7 +120,7 @@ pub struct IcmpEchoRequestor {
 
 impl IcmpEchoRequestor {
     pub fn new(
-        reply_tx: Sender<IcmpEchoReply>,
+        reply_tx: UnboundedSender<IcmpEchoReply>,
         target_addr: IpAddr,
         source_addr: Option<IpAddr>,
         ttl: Option<u8>,
@@ -208,8 +208,11 @@ impl IcmpEchoRequestor {
 
                 unsafe {
                     let mut ctx = self.reply_context.as_ref().lock().unwrap();
-                    assert!(ctx.buffer_state() == ReplyBufferState::Empty);
-                    ctx.state = ReplyBufferState::Icmp4;
+
+                    assert!(ctx.state != ReplyBufferState::Icmp6);
+                    if ctx.state == ReplyBufferState::Empty {
+                        ctx.state = ReplyBufferState::Icmp4;
+                    }
 
                     IcmpSendEcho2Ex(
                         self.handle,
@@ -243,8 +246,11 @@ impl IcmpEchoRequestor {
 
                 unsafe {
                     let mut ctx = self.reply_context.as_ref().lock().unwrap();
-                    assert!(ctx.buffer_state() == ReplyBufferState::Empty);
-                    ctx.state = ReplyBufferState::Icmp6;
+
+                    assert!(ctx.state != ReplyBufferState::Icmp4);
+                    if ctx.state == ReplyBufferState::Empty {
+                        ctx.state = ReplyBufferState::Icmp6;
+                    }
 
                     let src_saddr: SOCKADDR_IN6 = SocketAddrV6::new(saddr, 0, 0, 0).into();
                     let dst_saddr: SOCKADDR_IN6 = SocketAddrV6::new(taddr, 0, 0, 0).into();
@@ -334,7 +340,7 @@ unsafe extern "system" fn wait_callback(ptr: *mut c_void, timer_fired: BOOLEAN) 
             reply_context.timeout(),
         )
     } else {
-        match reply_context.state {
+        match reply_context.buffer_state() {
             ReplyBufferState::Empty => {
                 log::debug!("event signalled with invalid empty state");
                 return;
@@ -348,7 +354,7 @@ unsafe extern "system" fn wait_callback(ptr: *mut c_void, timer_fired: BOOLEAN) 
                     log::debug!("IcmpParseReplies failed: {}", io::Error::last_os_error());
                     return;
                 } else {
-                    debug_assert!(ret == 1);
+                    debug_assert_eq!(ret, 1);
 
                     let resp = *(reply_context.buffer_ptr() as *const ICMP_ECHO_REPLY);
                     let addr = IpAddr::V4(u32::from_be(resp.Address).into());
@@ -371,7 +377,7 @@ unsafe extern "system" fn wait_callback(ptr: *mut c_void, timer_fired: BOOLEAN) 
                     log::debug!("Icmp6ParseReplies failed: {}", io::Error::last_os_error());
                     return;
                 } else {
-                    debug_assert!(ret == 1);
+                    debug_assert_eq!(ret, 1);
 
                     let resp = *(reply_context.buffer_ptr() as *const ICMPV6_ECHO_REPLY);
                     let mut addr_raw = IN6_ADDR::default();
@@ -388,10 +394,10 @@ unsafe extern "system" fn wait_callback(ptr: *mut c_void, timer_fired: BOOLEAN) 
         }
     };
 
-    match reply_context.sender.take() {
+    match reply_context.sender.as_ref() {
         Some(sender) => {
-            if let Err(_) = sender.send(resp) {
-                log::debug!("failed to send reply to channel");
+            if let Err(e) = sender.unbounded_send(resp) {
+                log::debug!("failed to send reply to channel: {}", e);
             }
         }
         None => {
