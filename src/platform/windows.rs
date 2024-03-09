@@ -143,10 +143,15 @@ impl IcmpEchoRequestor {
         let ttl = ttl.unwrap_or(PING_DEFAULT_TTL);
         let timeout = timeout.unwrap_or(PING_DEFAULT_TIMEOUT);
 
-        let reply_context = NonNull::new(Box::into_raw(Box::new(Arc::new(Mutex::new(
+        let reply_context = match NonNull::new(Box::into_raw(Box::new(Arc::new(Mutex::new(
             ReplyContext::new(reply_tx, target_addr, timeout),
-        )))))
-        .expect("Box::into_raw returned null");
+        ))))) {
+            Some(ptr) => ptr,
+            None => {
+                unsafe { IcmpCloseHandle(handle) };
+                return Err(io::ErrorKind::OutOfMemory.into());
+            }
+        };
 
         let mut new_handle = HANDLE::default();
         let wait_object = match unsafe {
@@ -279,14 +284,19 @@ impl Drop for IcmpEchoRequestor {
     fn drop(&mut self) {
         unsafe {
             if !self.wait_object.is_invalid() {
-                UnregisterWaitEx(self.wait_object, INVALID_HANDLE_VALUE)
-                    .expect("failed to UnregisterWaitEx");
+                if let Err(e) = UnregisterWaitEx(self.wait_object, INVALID_HANDLE_VALUE).ok() {
+                    log::debug!("failed to UnregisterWaitEx: {}", e);
+                }
             }
             if !self.event.is_invalid() {
-                CloseHandle(self.event).expect("failed to CloseHandle");
+                if let Err(e) = CloseHandle(self.event).ok() {
+                    log::debug!("failed to CloseHandle: {}", e);
+                }
             }
             if !self.handle.is_invalid() {
-                IcmpCloseHandle(self.handle).expect("failed to IcmpCloseHandle");
+                if let Err(e) = IcmpCloseHandle(self.handle).ok() {
+                    log::debug!("failed to IcmpCloseHandle: {}", e);
+                }
             }
 
             drop(Box::from_raw(self.reply_context.as_ptr()));
