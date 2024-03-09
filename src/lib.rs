@@ -57,3 +57,28 @@ impl IcmpEchoReply {
         self.round_trip_time
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::IcmpEchoRequestor;
+    use futures::{channel::mpsc, StreamExt};
+
+    #[tokio::test]
+    async fn ping_localhost_v4() {
+        let (tx, mut rx) = mpsc::unbounded();
+
+        let pinger =
+            IcmpEchoRequestor::new(tx, "127.0.0.1".parse().unwrap(), None, None, None).unwrap();
+        pinger.send().await.unwrap();
+        rx.next().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn ping_localhost_v6() {
+        let (tx, mut rx) = mpsc::unbounded();
+
+        let pinger = IcmpEchoRequestor::new(tx, "::1".parse().unwrap(), None, None, None).unwrap();
+        pinger.send().await.unwrap();
+        rx.next().await.unwrap();
+    }
+}
