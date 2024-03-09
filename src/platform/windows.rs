@@ -185,7 +185,7 @@ impl IcmpEchoRequestor {
         })
     }
 
-    pub fn send(&self) -> io::Result<()> {
+    pub async fn send(&self) -> io::Result<()> {
         let mut ip_option = IP_OPTION_INFORMATION::default();
         ip_option.Ttl = self.ttl;
 

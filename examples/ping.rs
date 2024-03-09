@@ -19,7 +19,6 @@ async fn main() {
 
     let destination = args[1].parse().unwrap();
     let _ = ping(destination, 4).await;
-
 }
 
 async fn ping(dest: IpAddr, times: usize) -> io::Result<()> {
@@ -34,7 +33,7 @@ async fn ping(dest: IpAddr, times: usize) -> io::Result<()> {
     };
 
     for _ in 0..times {
-        if let Err(e) = pinger.send() {
+        if let Err(e) = pinger.send().await {
             eprintln!("Error in send: {}", e);
             return Err(e);
         }
