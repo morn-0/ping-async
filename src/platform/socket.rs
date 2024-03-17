@@ -178,7 +178,7 @@ impl IcmpEchoRequestor {
                 (IpAddr::V6(_), x) if x == IcmpType6::EchoReply.value() => {
                     return Ok((header, data))
                 }
-                _ => continue, // ignore the ECHO_REQUEST packet when ping ::1 (ICMPv6)
+                _ => continue, // ignore the ECHO_REQUEST packet when ping ::1 on macOS
             }
         }
     }

@@ -1,9 +1,26 @@
 [package]
-name = "Unprivileged Async Ping"
+name = "ping-async"
 version = "0.1.0"
+authors = ["hankbao <hankbao84@gmail.com>"]
+license = "MIT"
+description = "Unprivileged Async Ping"
+repository = "https://github.com/hankbao/ping-async"
+homepage = "https://lib.rs/crates/ping-async"
+documentation = "https://docs.rs/ping-async"
+readme = "README.md"
+keywords = [
+    "ping",
+    "icmp",
+    "async",
+    "tokio",
+    "winapi",
+    "socket",
+    "win32",
+    "linux",
+    "macos",
+]
+categories = ["network-programming"]
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 log = "0.4"
