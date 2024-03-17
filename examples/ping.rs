@@ -4,8 +4,8 @@ use std::io;
 use std::net::IpAddr;
 use std::time::Duration;
 
-use async_ping::IcmpEchoRequestor;
 use futures::{channel::mpsc, StreamExt};
+use ping_async::IcmpEchoRequestor;
 
 use tokio::time;
 

@@ -1,5 +1,5 @@
 [package]
-name = "async-ping"
+name = "Unprivileged Async Ping"
 version = "0.1.0"
 edition = "2021"
 
@@ -11,7 +11,7 @@ futures = "0.3"
 static_assertions = "1.1.0"
 
 [target.'cfg(windows)'.dependencies.windows]
-version = "0.43.0"
+version = "0.54.0"
 features = [
     "Win32_Foundation",
     "Win32_Networking_WinSock",
@@ -21,6 +21,13 @@ features = [
     "Win32_System_WindowsProgramming",
 ]
 
+[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
+byteorder = "1.0"
+ippacket = "0.1"
+rand = "0.8"
+socket2 = "0.5.6"
+tokio = { version = "1.36", features = ["macros", "net", "rt", "time"] }
+
 [dev-dependencies]
-tokio = { version = "1.2", features = ["macros", "rt-multi-thread", "time"] }
+tokio = { version = "1.36", features = ["macros", "rt-multi-thread", "time"] }
 tokio-stream = { version = "0.1", features = ["time"] }

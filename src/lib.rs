@@ -8,7 +8,7 @@ use std::time::Duration;
 
 pub const PING_DEFAULT_TTL: u8 = 128;
 pub const PING_DEFAULT_TIMEOUT: Duration = Duration::from_secs(2);
-pub const PING_DEFFAULT_REQUEST_DATA_LENGTH: usize = 32;
+pub const PING_DEFAULT_REQUEST_DATA_LENGTH: usize = 32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IcmpEchoStatus {
@@ -60,25 +60,30 @@ impl IcmpEchoReply {
 
 #[cfg(test)]
 mod tests {
-    use crate::IcmpEchoRequestor;
     use futures::{channel::mpsc, StreamExt};
+    use std::io;
+
+    use super::*;
 
     #[tokio::test]
-    async fn ping_localhost_v4() {
+    async fn ping_localhost_v4() -> io::Result<()> {
         let (tx, mut rx) = mpsc::unbounded();
 
-        let pinger =
-            IcmpEchoRequestor::new(tx, "127.0.0.1".parse().unwrap(), None, None, None).unwrap();
-        pinger.send().await.unwrap();
-        rx.next().await.unwrap();
+        let pinger = IcmpEchoRequestor::new(tx, "127.0.0.1".parse().unwrap(), None, None, None)?;
+        pinger.send().await?;
+        rx.next().await;
+
+        Ok(())
     }
 
     #[tokio::test]
-    async fn ping_localhost_v6() {
+    async fn ping_localhost_v6() -> io::Result<()> {
         let (tx, mut rx) = mpsc::unbounded();
 
-        let pinger = IcmpEchoRequestor::new(tx, "::1".parse().unwrap(), None, None, None).unwrap();
-        pinger.send().await.unwrap();
-        rx.next().await.unwrap();
+        let pinger = IcmpEchoRequestor::new(tx, "::1".parse().unwrap(), None, None, None)?;
+        pinger.send().await?;
+        rx.next().await;
+
+        Ok(())
     }
 }

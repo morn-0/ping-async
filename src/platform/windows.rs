@@ -38,8 +38,8 @@ use windows::Win32::NetworkManagement::IpHelper::IP_OPTION_INFORMATION;
 use windows::Win32::NetworkManagement::IpHelper::IP_OPTION_INFORMATION32 as IP_OPTION_INFORMATION;
 
 use crate::{
-    IcmpEchoReply, IcmpEchoStatus, PING_DEFAULT_TIMEOUT, PING_DEFAULT_TTL,
-    PING_DEFFAULT_REQUEST_DATA_LENGTH,
+    IcmpEchoReply, IcmpEchoStatus, PING_DEFAULT_REQUEST_DATA_LENGTH, PING_DEFAULT_TIMEOUT,
+    PING_DEFAULT_TTL,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
