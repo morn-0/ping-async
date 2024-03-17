@@ -8,17 +8,7 @@ repository = "https://github.com/hankbao/ping-async"
 homepage = "https://lib.rs/crates/ping-async"
 documentation = "https://docs.rs/ping-async"
 readme = "README.md"
-keywords = [
-    "ping",
-    "icmp",
-    "async",
-    "tokio",
-    "winapi",
-    "socket",
-    "win32",
-    "linux",
-    "macos",
-]
+keywords = ["ping", "icmp", "async", "tokio", "future"]
 categories = ["network-programming"]
 edition = "2021"
 
