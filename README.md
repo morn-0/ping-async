@@ -1,6 +1,6 @@
 # ping-async
 
-This crate can send unprivileged ICMP echo requests and receive echo replies asynchronously on both Windows and macOS. On Linux, it requires the `net.ipv4.ping_group_range` and `net.ipv6.ping_group_range` `sysctl` parameters to allow unprivileged users to create the ICMP sockets.
+This crate can send unprivileged ICMP echo requests and receive echo replies asynchronously on both Windows and macOS. On Linux, it requires the `net.ipv4.ping_group_range` `sysctl` parameters to allow unprivileged users to create the ICMP sockets.
 
 On Windows, it uses the `IcmpSendEcho2Ex` and `Icmp6SendEcho2` win32 API. On macOS and Linux, it uses the ICMP sockets with the help of `tokio`. Due to the latter's asynchronous nature, the time accuracy could be affected by the system's load.
 
