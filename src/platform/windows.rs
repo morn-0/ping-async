@@ -17,7 +17,7 @@ use windows::Win32::Foundation::{
 };
 use windows::Win32::NetworkManagement::IpHelper::{
     Icmp6CreateFile, Icmp6ParseReplies, Icmp6SendEcho2, IcmpCloseHandle, IcmpCreateFile,
-    IcmpHandle, IcmpParseReplies, IcmpSendEcho2Ex, ICMPV6_ECHO_REPLY_LH as ICMPV6_ECHO_REPLY,
+    IcmpParseReplies, IcmpSendEcho2Ex, ICMPV6_ECHO_REPLY_LH as ICMPV6_ECHO_REPLY,
     IP_DEST_HOST_UNREACHABLE, IP_DEST_NET_UNREACHABLE, IP_DEST_PORT_UNREACHABLE,
     IP_DEST_PROT_UNREACHABLE, IP_DEST_UNREACHABLE, IP_REQ_TIMED_OUT, IP_SUCCESS, IP_TIME_EXCEEDED,
     IP_TTL_EXPIRED_REASSEM, IP_TTL_EXPIRED_TRANSIT,
@@ -26,7 +26,7 @@ use windows::Win32::Networking::WinSock::{IN6_ADDR, SOCKADDR_IN6};
 use windows::Win32::System::Threading::{
     CreateEventW, RegisterWaitForSingleObject, UnregisterWaitEx, WT_EXECUTEINWAITTHREAD,
 };
-use windows::Win32::System::WindowsProgramming::IO_STATUS_BLOCK;
+use windows::Win32::System::IO::IO_STATUS_BLOCK;
 
 #[cfg(target_pointer_width = "32")]
 use windows::Win32::NetworkManagement::IpHelper::ICMP_ECHO_REPLY;
@@ -54,14 +54,14 @@ const REPLY_BUFFER_SIZE: usize = 100;
 // we don't provide request data, so we don't need to allocate space for it
 const_assert!(
     size_of::<ICMP_ECHO_REPLY>()
-        + PING_DEFFAULT_REQUEST_DATA_LENGTH
+        + PING_DEFAULT_REQUEST_DATA_LENGTH
         + 8
         + size_of::<IO_STATUS_BLOCK>()
         <= REPLY_BUFFER_SIZE
 );
 const_assert!(
     size_of::<ICMPV6_ECHO_REPLY>()
-        + PING_DEFFAULT_REQUEST_DATA_LENGTH
+        + PING_DEFAULT_REQUEST_DATA_LENGTH
         + 8
         + size_of::<IO_STATUS_BLOCK>()
         <= REPLY_BUFFER_SIZE
@@ -108,7 +108,7 @@ impl ReplyContext {
 }
 
 pub struct IcmpEchoRequestor {
-    handle: IcmpHandle,
+    handle: HANDLE,
     event: HANDLE,
     wait_object: HANDLE,
     target_addr: IpAddr,
@@ -135,7 +135,7 @@ impl IcmpEchoRequestor {
         let event = match unsafe { CreateEventW(None, false, false, None) } {
             Ok(event) => event,
             Err(e) => {
-                unsafe { IcmpCloseHandle(handle) };
+                let _ = unsafe { IcmpCloseHandle(handle) };
                 return Err(e.into());
             }
         };
@@ -148,7 +148,7 @@ impl IcmpEchoRequestor {
         ))))) {
             Some(ptr) => ptr,
             None => {
-                unsafe { IcmpCloseHandle(handle) };
+                let _ = unsafe { IcmpCloseHandle(handle) };
                 return Err(io::ErrorKind::OutOfMemory.into());
             }
         };
@@ -163,12 +163,11 @@ impl IcmpEchoRequestor {
                 timeout.as_millis() as u32,
                 WT_EXECUTEINWAITTHREAD,
             )
-            .ok()
         } {
             Ok(()) => new_handle,
             Err(e) => {
-                unsafe { CloseHandle(event) };
-                unsafe { IcmpCloseHandle(handle) };
+                let _ = unsafe { CloseHandle(event) };
+                let _ = unsafe { IcmpCloseHandle(handle) };
                 return Err(e.into());
             }
         };
@@ -189,7 +188,7 @@ impl IcmpEchoRequestor {
         let mut ip_option = IP_OPTION_INFORMATION::default();
         ip_option.Ttl = self.ttl;
 
-        let req_data = [0u8; PING_DEFFAULT_REQUEST_DATA_LENGTH];
+        let req_data = [0u8; PING_DEFAULT_REQUEST_DATA_LENGTH];
 
         let error = match self.target_addr {
             IpAddr::V4(taddr) => {
@@ -290,17 +289,17 @@ impl Drop for IcmpEchoRequestor {
     fn drop(&mut self) {
         unsafe {
             if !self.wait_object.is_invalid() {
-                if let Err(e) = UnregisterWaitEx(self.wait_object, INVALID_HANDLE_VALUE).ok() {
+                if let Err(e) = UnregisterWaitEx(self.wait_object, INVALID_HANDLE_VALUE) {
                     log::debug!("failed to UnregisterWaitEx: {}", e);
                 }
             }
             if !self.event.is_invalid() {
-                if let Err(e) = CloseHandle(self.event).ok() {
+                if let Err(e) = CloseHandle(self.event) {
                     log::debug!("failed to CloseHandle: {}", e);
                 }
             }
             if !self.handle.is_invalid() {
-                if let Err(e) = IcmpCloseHandle(self.handle).ok() {
+                if let Err(e) = IcmpCloseHandle(self.handle) {
                     log::debug!("failed to IcmpCloseHandle: {}", e);
                 }
             }
