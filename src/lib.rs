@@ -1,13 +1,11 @@
-// lib.rs
-
-mod platform;
 pub use platform::IcmpEchoRequestor;
-
 use std::net::IpAddr;
 use std::time::Duration;
 
+mod platform;
+
 pub const PING_DEFAULT_TTL: u8 = 128;
-pub const PING_DEFAULT_TIMEOUT: Duration = Duration::from_secs(2);
+pub const PING_DEFAULT_TIMEOUT: Duration = Duration::from_secs(1);
 pub const PING_DEFAULT_REQUEST_DATA_LENGTH: usize = 32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,10 +58,9 @@ impl IcmpEchoReply {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use futures::{channel::mpsc, StreamExt};
     use std::io;
-
-    use super::*;
 
     #[tokio::test]
     async fn ping_localhost_v4() -> io::Result<()> {

@@ -1,33 +1,18 @@
-// platform/windows.rs
-#![cfg(target_os = "windows")]
-
-use std::ffi::c_void;
-use std::io;
-use std::mem::size_of;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
-use std::ptr::NonNull;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
-
+use crate::{
+    IcmpEchoReply, IcmpEchoStatus, PING_DEFAULT_REQUEST_DATA_LENGTH, PING_DEFAULT_TIMEOUT,
+    PING_DEFAULT_TTL,
+};
 use futures::channel::mpsc::UnboundedSender;
 use static_assertions::const_assert;
-
-use windows::Win32::Foundation::{
-    CloseHandle, GetLastError, BOOLEAN, ERROR_IO_PENDING, HANDLE, INVALID_HANDLE_VALUE,
+use std::{
+    ffi::c_void,
+    io,
+    mem::size_of,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6},
+    ptr::NonNull,
+    sync::{Arc, Mutex},
+    time::Duration,
 };
-use windows::Win32::NetworkManagement::IpHelper::{
-    Icmp6CreateFile, Icmp6ParseReplies, Icmp6SendEcho2, IcmpCloseHandle, IcmpCreateFile,
-    IcmpParseReplies, IcmpSendEcho2Ex, ICMPV6_ECHO_REPLY_LH as ICMPV6_ECHO_REPLY,
-    IP_DEST_HOST_UNREACHABLE, IP_DEST_NET_UNREACHABLE, IP_DEST_PORT_UNREACHABLE,
-    IP_DEST_PROT_UNREACHABLE, IP_DEST_UNREACHABLE, IP_REQ_TIMED_OUT, IP_SUCCESS, IP_TIME_EXCEEDED,
-    IP_TTL_EXPIRED_REASSEM, IP_TTL_EXPIRED_TRANSIT,
-};
-use windows::Win32::Networking::WinSock::{IN6_ADDR, SOCKADDR_IN6};
-use windows::Win32::System::Threading::{
-    CreateEventW, RegisterWaitForSingleObject, UnregisterWaitEx, WT_EXECUTEINWAITTHREAD,
-};
-use windows::Win32::System::IO::IO_STATUS_BLOCK;
-
 #[cfg(target_pointer_width = "32")]
 use windows::Win32::NetworkManagement::IpHelper::ICMP_ECHO_REPLY;
 #[cfg(target_pointer_width = "64")]
@@ -36,10 +21,22 @@ use windows::Win32::NetworkManagement::IpHelper::ICMP_ECHO_REPLY32 as ICMP_ECHO_
 use windows::Win32::NetworkManagement::IpHelper::IP_OPTION_INFORMATION;
 #[cfg(target_pointer_width = "64")]
 use windows::Win32::NetworkManagement::IpHelper::IP_OPTION_INFORMATION32 as IP_OPTION_INFORMATION;
-
-use crate::{
-    IcmpEchoReply, IcmpEchoStatus, PING_DEFAULT_REQUEST_DATA_LENGTH, PING_DEFAULT_TIMEOUT,
-    PING_DEFAULT_TTL,
+use windows::Win32::{
+    Foundation::{CloseHandle, GetLastError, ERROR_IO_PENDING, HANDLE},
+    NetworkManagement::IpHelper::{
+        Icmp6CreateFile, Icmp6ParseReplies, Icmp6SendEcho2, IcmpCloseHandle, IcmpCreateFile,
+        IcmpParseReplies, IcmpSendEcho2Ex, ICMPV6_ECHO_REPLY_LH as ICMPV6_ECHO_REPLY,
+        IP_DEST_HOST_UNREACHABLE, IP_DEST_NET_UNREACHABLE, IP_DEST_PORT_UNREACHABLE,
+        IP_DEST_PROT_UNREACHABLE, IP_DEST_UNREACHABLE, IP_REQ_TIMED_OUT, IP_SUCCESS,
+        IP_TIME_EXCEEDED, IP_TTL_EXPIRED_REASSEM, IP_TTL_EXPIRED_TRANSIT,
+    },
+    Networking::WinSock::IN6_ADDR,
+    System::{
+        Threading::{
+            CreateEventW, RegisterWaitForSingleObject, UnregisterWaitEx, WT_EXECUTEINWAITTHREAD,
+        },
+        IO::IO_STATUS_BLOCK,
+    },
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,7 +88,7 @@ impl ReplyContext {
     }
 
     fn buffer_ptr(&mut self) -> *mut u8 {
-        self.buffer.as_mut_ptr() as *mut u8
+        self.buffer.as_mut_ptr()
     }
 
     fn buffer_size(&self) -> usize {
@@ -185,16 +182,17 @@ impl IcmpEchoRequestor {
     }
 
     pub async fn send(&self) -> io::Result<()> {
-        let mut ip_option = IP_OPTION_INFORMATION::default();
-        ip_option.Ttl = self.ttl;
-
-        let req_data = [0u8; PING_DEFAULT_REQUEST_DATA_LENGTH];
+        let ip_option = IP_OPTION_INFORMATION {
+            Ttl: self.ttl,
+            ..Default::default()
+        };
+        let buffer = [0u8; PING_DEFAULT_REQUEST_DATA_LENGTH];
 
         let error = match self.target_addr {
-            IpAddr::V4(taddr) => {
-                let saddr = if let Some(saddr) = self.source_addr {
-                    if let IpAddr::V4(s) = saddr {
-                        s
+            IpAddr::V4(target) => {
+                let source = if let Some(source) = self.source_addr {
+                    if let IpAddr::V4(v) = source {
+                        v
                     } else {
                         return Err(io::Error::new(
                             io::ErrorKind::InvalidInput,
@@ -215,13 +213,13 @@ impl IcmpEchoRequestor {
 
                     IcmpSendEcho2Ex(
                         self.handle,
-                        self.event,
+                        Some(self.event),
                         None,
                         None,
-                        u32::from(saddr).to_be(),
-                        u32::from(taddr).to_be(),
-                        req_data.as_ptr() as *const _,
-                        req_data.len() as u16,
+                        u32::from(source).to_be(),
+                        u32::from(target).to_be(),
+                        buffer.as_ptr() as *const _,
+                        buffer.len() as u16,
                         Some(&ip_option as *const _ as *const _),
                         ctx.buffer_ptr() as *mut _,
                         ctx.buffer_size() as u32,
@@ -229,10 +227,10 @@ impl IcmpEchoRequestor {
                     )
                 }
             }
-            IpAddr::V6(taddr) => {
-                let saddr = if let Some(saddr) = self.source_addr {
-                    if let IpAddr::V6(s) = saddr {
-                        s
+            IpAddr::V6(target) => {
+                let source = if let Some(source) = self.source_addr {
+                    if let IpAddr::V6(v) = source {
+                        v
                     } else {
                         return Err(io::Error::new(
                             io::ErrorKind::InvalidInput,
@@ -251,18 +249,18 @@ impl IcmpEchoRequestor {
                         ctx.state = ReplyBufferState::Icmp6;
                     }
 
-                    let src_saddr: SOCKADDR_IN6 = SocketAddrV6::new(saddr, 0, 0, 0).into();
-                    let dst_saddr: SOCKADDR_IN6 = SocketAddrV6::new(taddr, 0, 0, 0).into();
+                    let source = SocketAddrV6::new(source, 0, 0, 0).into();
+                    let target = SocketAddrV6::new(target, 0, 0, 0).into();
 
                     Icmp6SendEcho2(
                         self.handle,
-                        self.event,
+                        Some(self.event),
                         None,
                         None,
-                        &src_saddr,
-                        &dst_saddr,
-                        req_data.as_ptr() as *const _,
-                        req_data.len() as u16,
+                        &source,
+                        &target,
+                        buffer.as_ptr() as *const _,
+                        buffer.len() as u16,
                         Some(&ip_option as *const _ as *const _),
                         ctx.buffer_ptr() as *mut _,
                         ctx.buffer_size() as u32,
@@ -289,7 +287,7 @@ impl Drop for IcmpEchoRequestor {
     fn drop(&mut self) {
         unsafe {
             if !self.wait_object.is_invalid() {
-                if let Err(e) = UnregisterWaitEx(self.wait_object, INVALID_HANDLE_VALUE) {
+                if let Err(e) = UnregisterWaitEx(self.wait_object, None) {
                     log::debug!("failed to UnregisterWaitEx: {}", e);
                 }
             }
@@ -324,15 +322,16 @@ fn ip_error_to_icmp_status(code: u32) -> IcmpEchoStatus {
     }
 }
 
-unsafe extern "system" fn wait_callback(ptr: *mut c_void, timer_fired: BOOLEAN) {
+unsafe extern "system" fn wait_callback(ptr: *mut c_void, timer_fired: bool) {
     let mut reply_context = (ptr as *mut Arc<Mutex<ReplyContext>>)
         .as_ref()
         .unwrap()
         .lock()
         .unwrap();
 
-    let resp = if timer_fired.as_bool() {
+    let resp = if timer_fired {
         log::debug!("wait_callback timed out");
+
         IcmpEchoReply::new(
             reply_context.target(),
             IcmpEchoStatus::TimedOut,
@@ -349,6 +348,7 @@ unsafe extern "system" fn wait_callback(ptr: *mut c_void, timer_fired: BOOLEAN) 
                     reply_context.buffer_ptr() as *mut _,
                     reply_context.buffer_size() as u32,
                 );
+
                 if ret == 0 {
                     log::debug!("IcmpParseReplies failed: {}", io::Error::last_os_error());
                     return;
@@ -372,6 +372,7 @@ unsafe extern "system" fn wait_callback(ptr: *mut c_void, timer_fired: BOOLEAN) 
                         reply_context.buffer_size() as u32,
                     )
                 };
+
                 if ret == 0 {
                     log::debug!("Icmp6ParseReplies failed: {}", io::Error::last_os_error());
                     return;

@@ -1,20 +1,17 @@
-// platform/socket.rs
-#![cfg(any(target_os = "macos", target_os = "linux"))]
-
-use std::io;
-use std::mem;
-use std::net::{IpAddr, SocketAddr, SocketAddrV4, SocketAddrV6};
-use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-
+use crate::{IcmpEchoReply, IcmpEchoStatus, PING_DEFAULT_TIMEOUT, PING_DEFAULT_TTL};
 use byteorder::NetworkEndian;
 use futures::channel::mpsc::UnboundedSender;
 use ippacket::{Bytes, IcmpHeader, IcmpType4, IcmpType6};
 use rand::random;
 use socket2::{Domain, Protocol, Socket, Type};
+use std::{
+    io,
+    mem::{self},
+    net::{IpAddr, SocketAddr, SocketAddrV4, SocketAddrV6},
+    sync::Arc,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
 use tokio::{net::UdpSocket, task, time};
-
-use crate::{IcmpEchoReply, IcmpEchoStatus, PING_DEFAULT_TIMEOUT, PING_DEFAULT_TTL};
 
 pub struct IcmpEchoRequestor {
     socket: Arc<UdpSocket>,
@@ -81,10 +78,9 @@ impl IcmpEchoRequestor {
 
     pub async fn send(&self) -> io::Result<()> {
         let payload = vec![0u8; IcmpHeader::len() + mem::size_of::<u128>()];
-        let byte = Bytes::new(payload.into_boxed_slice());
-        let packet = byte.clone();
+        let packet = Bytes::new(payload.into_boxed_slice());
 
-        let (mut header, mut data) = IcmpHeader::with_bytes(byte)?;
+        let (mut header, mut data) = IcmpHeader::with_bytes(packet.clone())?;
         if self.target_addr.is_ipv4() {
             header.set_icmp_type(IcmpType4::EchoRequest.value());
         } else {
@@ -96,7 +92,7 @@ impl IcmpEchoRequestor {
 
         let socket_clone = Arc::clone(&self.socket);
         let tx_clone = self.reply_tx.clone();
-        let target_clone = self.target_addr.clone();
+        let target_clone = self.target_addr;
 
         let mut tick = time::interval(self.timeout);
         // approximately 0ms have elapsed. The first tick above completes immediately.
@@ -111,8 +107,8 @@ impl IcmpEchoRequestor {
                 )
             })?
             .as_nanos();
+        data.write_u128::<NetworkEndian>(0, now)?;
 
-        data.write_u128::<NetworkEndian>(0, now).unwrap();
         if self.target_addr.is_ipv4() {
             header.calculate_checksum(data.pair_iter());
         }
@@ -128,7 +124,6 @@ impl IcmpEchoRequestor {
                         IcmpEchoStatus::TimedOut,
                         beginning.elapsed(),
                     ));
-                    return;
                 }
                 header = IcmpEchoRequestor::recv_loop(socket_clone, target_clone) => {
                     match header {
@@ -143,6 +138,7 @@ impl IcmpEchoRequestor {
                         }
                         Err(e) => {
                             log::debug!("error upon recving ICMP packet: {}", e);
+
                             let _ = tx_clone.unbounded_send(IcmpEchoReply::new(
                                 target_clone,
                                 IcmpEchoStatus::Unknown,
@@ -162,13 +158,12 @@ impl IcmpEchoRequestor {
             let mut buf = vec![0u8; 1024];
 
             let size = socket.recv(&mut buf).await?;
-            let payload: Box<[u8]>;
-            if target.is_ipv4() {
+            let payload = if target.is_ipv4() {
                 // skip the IP header for icmp
-                payload = Vec::from(&buf[20..size]).into_boxed_slice();
+                Vec::from(&buf[20..size]).into_boxed_slice()
             } else {
-                payload = Vec::from(&buf[..size]).into_boxed_slice();
-            }
+                Vec::from(&buf[..size]).into_boxed_slice()
+            };
 
             let (header, data) = IcmpHeader::with_bytes(Bytes::new(payload))?;
             match (target, header.icmp_type()) {
