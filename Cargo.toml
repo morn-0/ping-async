@@ -8,7 +8,7 @@ rand = { version = "0.9", features = ["thread_rng"], default-features = false }
 thiserror = { version = "2", features = ["std"], default-features = false }
 log = { version = "0.4", default-features = false }
 
-[target.'cfg(windows)'.dependencies]
+[target.'cfg(target_family = "windows")'.dependencies]
 flume = { version = "0.11", features = ["async"], default-features = false }
 windows = { version = "0.60", features = [
     "std",
@@ -21,7 +21,7 @@ windows = { version = "0.60", features = [
     "Win32_System_WindowsProgramming",
 ], default-features = false }
 
-[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
+[target.'cfg(target_family = "unix")'.dependencies]
 socket2 = { version = "0.5", default-features = false }
 pnet_packet = { version = "0.35", default-features = false }
 tokio = { version = "1", features = [
